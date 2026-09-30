@@ -22,8 +22,12 @@ knitr::opts_chunk$set(
 
 ##  R Markdown
 ```{r}
-# 1. Loading 18
-github_url <- "https://github.com/ellenthickman/687Project/raw/cd78b4c0fbff3cd84d666bb3bfa8867ff6caa755/36755-0018-Data.rda"
+github_remittance_url <- "https://github.com/ellenthickman/687Project/raw/refs/heads/main/36755-0001-Data.rda"
 
-load(url(github_url)) 
+remittance_dta <- load(url(github_remittance_url)) 
+
+# gross farm productivity ~ remittances + farm tech + of hired laborers + land
 ```
+
+# 1. Choose our variables < DONE
+# 2. Descriptive Statistics <- Next Wednesday
