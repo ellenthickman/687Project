@@ -1,0 +1,29 @@
+---
+title: "687 Project"
+author: "Ellen Hickman, Wenyi Wang, & Beining Niu"
+date: "2026-09-12"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r, include=FALSE}
+# Load necessary libraries
+library(tidyverse)
+options(scipen = 999)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE, 
+  tidy.opts = list(comment = FALSE, width.cutoff = 60)
+)
+```
+
+##  R Markdown
+```{r}
+# 1. Loading 18
+github_url <- "https://github.com/ellenthickman/687Project/raw/cd78b4c0fbff3cd84d666bb3bfa8867ff6caa755/36755-0018-Data.rda"
+
+load(url(github_url))
+```
