@@ -25,5 +25,5 @@ knitr::opts_chunk$set(
 # 1. Loading 18
 github_url <- "https://github.com/ellenthickman/687Project/raw/cd78b4c0fbff3cd84d666bb3bfa8867ff6caa755/36755-0018-Data.rda"
 
-load(url(github_url))
+load(url(github_url)) 
 ```
