@@ -6,10 +6,11 @@ output:
   pdf_document: default
   word_document: default
 ---
-
+## 1. R Markdown
 ```{r, include=FALSE}
 # Load necessary libraries
 library(tidyverse)
+library(knitr)
 options(scipen = 999)
 ```
 
@@ -20,14 +21,154 @@ knitr::opts_chunk$set(
 )
 ```
 
-##  R Markdown
+## 2. Import CVFS data: Labour Outmigration, Agricultural Productivity and Food Security, Nepal, 2015-2017 
 ```{r}
-github_remittance_url <- "https://github.com/ellenthickman/687Project/raw/refs/heads/main/36755-0001-Data.rda"
+# A. Load data
+github_remittance_url <- paste0(
+  "https://github.com/ellenthickman/687Project/raw/",
+  "refs/heads/main/36755-0001-Data.rda"
+)
 
-remittance_dta <- load(url(github_remittance_url)) 
+temp_env <- new.env()
+loaded_names <- load(url(github_remittance_url), envir = temp_env)
 
-# gross farm productivity ~ remittances + farm tech + of hired laborers + land
+loaded_names
+remit_w <- temp_env[[loaded_names[1]]]
+
+# B. Select variables
+tv_prefixes <- c(
+  "A10_", "B11C_", "B12C_", "B13C_",
+  "B14C_", "B15C_", "B16B_", "B17_1B_", "B17_2B_",
+  "B17_3B_", "B17_4B_", "B17_5B_", "B17_6B_",
+  "B17_7B_", "D30B_", "D31B_", "C21_", "REM"
+)
+
+remit_w <- remit_w |>
+  select(HHID, ETHNICITY,  starts_with(tv_prefixes))
+
+# C. Transform from wide to long
+remit_l <- remit_w |>
+  pivot_longer(
+    cols = matches(
+      paste0(
+        "^(",
+        paste(tv_prefixes, collapse = "|"),
+        ")(63|64|65|66|67|68|69|70|71|72)$"
+      )
+    ),
+    names_to = c(".value", "year"),
+    names_pattern = "^(.*?)(63|64|65|66|67|68|69|70|71|72)$",
+    names_transform = list(year = as.integer)
+  )
+```
+## 3. Clean Data
+```{r}
+# A. Create a gross farm product
+## i. Set variable list
+gfp_vars <- c("B11C_", "B12C_", "B13C_",
+  "B14C_", "B15C_", "B16B_", "B17_1B_", "B17_2B_",
+  "B17_3B_", "B17_4B_", "B17_5B_", "B17_6B_",
+  "B17_7B_",  "D30B_", "D31B_")
+
+## ii. Mutate to generate gfp indicator
+remit_l <- remit_l |>
+  mutate(
+    across(
+      any_of(gfp_vars),
+      ~ as.numeric(as.character(.x))
+    ),
+    gfp = rowSums(across(any_of(gfp_vars)), na.rm = TRUE)
+  )
+
+## iii. Drop extraneous variables 
+remit_l <- remit_l |>
+  select(-any_of(gfp_vars))
+
+# B. Rename variables
+remit_l <- remit_l |>
+  rename(
+    rem = REM,
+    hired_lab = C21_,
+    land_owned = A10_,
+    hhid = HHID,
+    ethnic = ETHNICITY
+  )
 ```
 
-# 1. Choose our variables < DONE
-# 2. Descriptive Statistics <- Next Wednesday
+## 3. Descriptive statistics
+Descriptive statistics of the key variables modeling for each household:
+$$
+gross\ farm\ productivity\ \sim remittances\ + farm\ tech\ +\ \#\ of\ hired\ laborers\ +\ land
+$$
+### A. Gross farm productivity 
+```{r}
+remit_l |>
+  group_by(year) |>
+  summarise(
+    Min = min(gfp, na.rm = TRUE),
+    Q1 = quantile(gfp, 0.25, na.rm = TRUE),
+    Median = median(gfp, na.rm = TRUE),
+    Mean = mean(gfp, na.rm = TRUE),
+    Q3 = quantile(gfp, 0.75, na.rm = TRUE),
+    Max = max(gfp, na.rm = TRUE)
+  ) |>
+  mutate(across(where(is.numeric), \(x) round(x, 0))) |>
+  kable(caption = "Summary of Gross Farm Product by year (Rupees)")
+```
+
+### B. Remittances
+```{r}
+remit_l |>
+  group_by(year) |>
+  summarise(
+    Min = min(rem, na.rm = TRUE),
+    Q1 = quantile(rem, 0.25, na.rm = TRUE),
+    Median = median(rem, na.rm = TRUE),
+    Mean = mean(rem, na.rm = TRUE),
+    Q3 = quantile(rem, 0.75, na.rm = TRUE),
+    Max = max(rem, na.rm = TRUE)
+  ) |>
+  mutate(across(where(is.numeric), \(x) round(x, 0))) |>
+  kable(caption = "Summary of remittances by year (Rupees)")
+```
+### C. Farm technology --> NOTE: I couldn't find a good indicator of farm technology yet
+
+### D. # of Hired laborers
+```{r}
+remit_l |>
+  group_by(year) |>
+  summarise(
+    Min = min(hired_lab, na.rm = TRUE),
+    Q1 = quantile(hired_lab, 0.25, na.rm = TRUE),
+    Median = median(hired_lab, na.rm = TRUE),
+    Mean = mean(hired_lab, na.rm = TRUE),
+    Q3 = quantile(hired_lab, 0.75, na.rm = TRUE),
+    Max = max(hired_lab, na.rm = TRUE)
+  ) |>
+  mutate(across(where(is.numeric), \(x) round(x, 0))) |>
+  kable(caption = "Summary of hired laborers by year")
+```
+### E. Land
+```{r}
+remit_l |>
+  group_by(year) |>
+  summarise(
+    Min = min(land_owned, na.rm = TRUE),
+    Q1 = quantile(land_owned, 0.25, na.rm = TRUE),
+    Median = median(land_owned, na.rm = TRUE),
+    Mean = mean(land_owned, na.rm = TRUE),
+    Q3 = quantile(land_owned, 0.75, na.rm = TRUE),
+    Max = max(land_owned, na.rm = TRUE)
+  ) |>
+  mutate(across(where(is.numeric), \(x) round(x, 2))) |>
+  kable(caption = "Summary of land owned by year (Katha)")
+```
+### F. Demographics
+```{r}
+remit_l %>%
+  count(ethnic) %>%
+  mutate(
+    '%' = n / sum(n) * 100
+  ) %>%
+  kable(caption = "Household ethnicity", digits = 2)
+```
