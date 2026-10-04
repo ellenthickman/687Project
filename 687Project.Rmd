@@ -40,7 +40,7 @@ tv_prefixes <- c(
   "A10_", "B11C_", "B12C_", "B13C_",
   "B14C_", "B15C_", "B16B_", "B17_1B_", "B17_2B_",
   "B17_3B_", "B17_4B_", "B17_5B_", "B17_6B_",
-  "B17_7B_", "D30B_", "D31B_", "C21_", "REM"
+  "B17_7B_", "C18_", "C19_", "C20_", "D30B_", "D31B_", "C21_", "REM"
 )
 
 remit_w <- remit_w |>
@@ -91,9 +91,27 @@ remit_l <- remit_l |>
     hired_lab = C21_,
     land_owned = A10_,
     hhid = HHID,
-    ethnic = ETHNICITY
+    ethnic = ETHNICITY,
+    tractor_time = C18_,
+    thresher_used = C19_,
+    motor_used = C20_
   )
+
+# C. Create farm technology indicator
+remit_l <- remit_l |>
+  mutate(
+    tractor_used = case_when(
+      tractor_time == 0 ~ 0,
+      tractor_time > 0 & tractor_time <= 6600 ~ 1,
+      TRUE ~ NA_real_),
+    across(c(thresher_used, motor_used),
+           ~ case_when(
+             as.character(.x) %in% c("(0) No" , "0")  ~ 0,
+             as.character(.x) %in% c("(1) Yes", "1")  ~ 1,
+             TRUE ~ NA_real_)),
+    farm_tech = tractor_used + thresher_used + motor_used)
 ```
+
 
 ## 3. Descriptive statistics
 Descriptive statistics of the key variables modeling for each household:
@@ -132,6 +150,23 @@ remit_l |>
   kable(caption = "Summary of remittances by year (Rupees)")
 ```
 ### C. Farm technology --> NOTE: I couldn't find a good indicator of farm technology yet
+
+```{r}
+remit_l |>
+  group_by(year) |>
+  summarise(
+    N = sum(!is.na(farm_tech)),
+    Missing = sum(is.na(farm_tech)),
+    Min = min(farm_tech, na.rm = TRUE),
+    Q1 = quantile(farm_tech, 0.25, na.rm = TRUE),
+    Median = median(farm_tech, na.rm = TRUE),
+    Mean = mean(farm_tech, na.rm = TRUE),
+    Q3 = quantile(farm_tech, 0.75, na.rm = TRUE), 
+    Max = max(farm_tech, na.rm = TRUE)
+    ) |>
+  mutate(across(where(is.numeric), \(x) round(x, 2))) |>
+  kable(caption = "Summary of farm technology indiactor (0-3) by year")
+```
 
 ### D. # of Hired laborers
 ```{r}
