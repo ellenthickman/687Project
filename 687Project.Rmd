@@ -168,6 +168,40 @@ remit_l |>
   kable(caption = "Summary of farm technology indiactor (0-3) by year")
 ```
 
+```{r}
+farm_tech_all_years_plot <- remit_l |>
+  filter(!is.na(farm_tech)) |>
+  ggplot(aes(x = factor(farm_tech))) +
+  geom_bar(fill = "skyblue") +
+  labs(
+    title = "Distribution of farm technology indicator (years 63-72 combined)",
+    x = "Number of machinery types used",
+    y = "Number of household observations"
+  ) +
+  theme_classic()
+
+farm_tech_all_years_plot
+```
+Note: This plot excludes missing values.
+
+```{r}
+#This plot excludes missing values and year 63 (only one valid observation).
+farm_tech_by_year_plot <- remit_l |>
+  filter(!is.na(farm_tech), year != 63) |>
+  ggplot(aes(x = factor(farm_tech, levels = 0:3))) +
+  geom_bar(fill = "skyblue") +
+  facet_wrap(~ year, ncol = 3) +
+  scale_x_discrete(drop = FALSE) +
+  labs(
+    title = "Distribution of farm technology indicator by year",
+    x = "Number of machinery types used",
+    y = "Number of household observations") +
+  theme_classic()
+
+farm_tech_by_year_plot
+```
+Note: This plot excludes missing values and data in year 63 (only one observation).
+
 ### D. # of Hired laborers
 ```{r}
 remit_l |>
