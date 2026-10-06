@@ -149,6 +149,43 @@ remit_l |>
   mutate(across(where(is.numeric), \(x) round(x, 0))) |>
   kable(caption = "Summary of remittances by year (Rupees)")
 ```
+
+```{r}
+rem_plot <- remit_l |>
+  filter(!is.na(rem)) |>
+  ggplot(aes(x = rem)) +
+  geom_histogram(
+    bins = 30, fill = "skyblue", color = "white"
+  ) +
+  labs(
+    title = "Distribution of remittances (orginal scale)",
+    subtitle = "years 63-72 combined",
+    x = "Remittances (Rupees)",
+    y = "Number of observations"
+  ) +
+  theme_classic()
+rem_plot
+```
+
+```{r}
+rem_plot_log <- remit_l |>
+  filter(!is.na(rem), rem >= 0) |>
+  ggplot(aes(x = log1p(rem))) +
+  geom_histogram(
+    bins = 30, fill = "skyblue", color = "white"
+  ) +
+  labs(
+    title = "Distribution of remittances (log-fransformed)",
+    subtitle = "Years 63-72 combined",
+    x = "ln(1 + remittances)",
+    y = "Number of observations"
+  ) +
+  theme_classic()
+
+rem_plot_log
+```
+
+
 ### C. Farm technology --> NOTE: I couldn't find a good indicator of farm technology yet
 
 ```{r}
@@ -176,7 +213,7 @@ farm_tech_all_years_plot <- remit_l |>
   labs(
     title = "Distribution of farm technology indicator (years 63-72 combined)",
     x = "Number of machinery types used",
-    y = "Number of household observations"
+    y = "Number of observations"
   ) +
   theme_classic()
 
@@ -217,6 +254,25 @@ remit_l |>
   mutate(across(where(is.numeric), \(x) round(x, 0))) |>
   kable(caption = "Summary of hired laborers by year")
 ```
+
+```{r}
+labor_plot <- remit_l |>
+  filter(!is.na(hired_lab)) |>
+  ggplot(aes(x = hired_lab)) +
+  geom_histogram(
+    bins = 30, fill = "skyblue", color = "white"
+  ) +
+  labs(
+    title = "Distribution of hired laborers (years 63-72 combined)",
+    x = "Number of hired laborers",
+    y = "Number of observations"
+  ) +
+  theme_classic()
+
+labor_plot
+```
+
+
 ### E. Land
 ```{r}
 remit_l |>
@@ -232,6 +288,22 @@ remit_l |>
   mutate(across(where(is.numeric), \(x) round(x, 2))) |>
   kable(caption = "Summary of land owned by year (Katha)")
 ```
+
+```{r}
+land_plot <- remit_l |>
+  filter(!is.na(land_owned)) |>
+  ggplot(aes(x = land_owned)) +
+  geom_histogram(
+    bins = 30, fill = "skyblue", color = "white"
+    ) +
+  labs(title = "Distribution of land owned (years 63-72 combined)",
+       x = "Land owned (Katha)",
+       y = "Number of observations") +
+  theme_classic()
+
+land_plot
+```
+
 ### F. Demographics
 ```{r}
 remit_l %>%
