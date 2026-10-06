@@ -313,3 +313,56 @@ remit_l %>%
   ) %>%
   kable(caption = "Household ethnicity", digits = 2)
 ```
+
+### G. Check missing values vs 0 sales
+```{r}
+raw_data <- temp_env[[loaded_names[1]]]
+
+check_vars <- c(
+  "B11C_", "B12C_", "B13C_", "B14C_", "B15C_",
+  "B16B_",
+  "B17_1B_", "B17_2B_", "B17_3B_", "B17_4B_",
+  "B17_5B_", "B17_6B_", "B17_7B_",
+  "D30B_", "D31B_"
+)
+
+missing_check <- lapply(63:72, function(y) {
+
+  column_names <- paste0(check_vars, y)
+  components <- raw_data[, column_names, drop = FALSE]
+
+  stopifnot(all(vapply(components, is.numeric, logical(1))))
+
+  # Number of nonmissing components in each household-year
+  n_observed <- rowSums(!is.na(components))
+
+  # Reproduce the original calculation ONLY to diagnose missingness
+  original_sum <- rowSums(components, na.rm = TRUE)
+
+  data.frame(
+    year = 2000 + y,
+    total = nrow(components),
+    all_missing = sum(n_observed == 0),
+    partially_missing = sum(
+      n_observed > 0 & n_observed < length(check_vars)
+    ),
+    complete = sum(n_observed == length(check_vars)),
+    all_missing_but_sum_zero = sum(
+      n_observed == 0 & original_sum == 0
+    )
+  )
+})
+
+missing_check <- bind_rows(missing_check)
+
+kable(
+  missing_check,
+  caption = "Missingness in the original GFP components"
+)
+```
+```
+
+
+
+
+
