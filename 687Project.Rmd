@@ -44,7 +44,7 @@ tv_prefixes <- c(
 )
 
 remit_w <- remit_w |>
-  select(HHID, ETHNICITY,  starts_with(tv_prefixes))
+  select(HHID, ETHNICITY,  starts_with(tv_prefixes) & !ends_with("63")) # Excluding year 2063 due to missing data in gfp indicator
 
 # C. Transform from wide to long
 remit_l <- remit_w |>
@@ -53,11 +53,11 @@ remit_l <- remit_w |>
       paste0(
         "^(",
         paste(tv_prefixes, collapse = "|"),
-        ")(63|64|65|66|67|68|69|70|71|72)$"
+        ")(64|65|66|67|68|69|70|71|72)$" 
       )
     ),
     names_to = c(".value", "year"),
-    names_pattern = "^(.*?)(63|64|65|66|67|68|69|70|71|72)$",
+    names_pattern = "^(.*?)(64|65|66|67|68|69|70|71|72)$",
     names_transform = list(year = as.integer)
   )
 ```
@@ -65,10 +65,21 @@ remit_l <- remit_w |>
 ```{r}
 # A. Create a gross farm product
 ## i. Set variable list
-gfp_vars <- c("B11C_", "B12C_", "B13C_",
-  "B14C_", "B15C_", "B16B_", "B17_1B_", "B17_2B_",
-  "B17_3B_", "B17_4B_", "B17_5B_", "B17_6B_",
-  "B17_7B_",  "D30B_", "D31B_")
+gfp_vars <- c("B11C_", # Rice (KG)
+              "B12C_", # Maize (KG)
+              "B13C_", # Wheat (KG)
+              "B14C_", # Mustard (KG)
+              "B15C_", # Red Lentil (KG)
+              "B16B_", # Vegetable
+              "B17_1B_", # Buckwheat
+              "B17_2B_", # Finger millet
+              "B17_3B_", # Sesame
+              "B17_4B_", # Kidney bean
+              "B17_5B_", # Pea/gram
+              "B17_6B_", # Cowpea/bean
+              "B17_7B_", # Other crops
+              "D30B_", # Poultry production
+              "D31B_") # Other farming production
 
 ## ii. Mutate to generate gfp indicator
 remit_l <- remit_l |>
@@ -83,7 +94,9 @@ remit_l <- remit_l |>
 ## iii. Drop extraneous variables 
 remit_l <- remit_l |>
   select(-any_of(gfp_vars))
+```
 
+```{r}
 # B. Rename variables
 remit_l <- remit_l |>
   rename(
@@ -96,7 +109,9 @@ remit_l <- remit_l |>
     thresher_used = C19_,
     motor_used = C20_
   )
+```
 
+```{r}
 # C. Create farm technology indicator
 remit_l <- remit_l |>
   mutate(
@@ -112,8 +127,53 @@ remit_l <- remit_l |>
     farm_tech = tractor_used + thresher_used + motor_used)
 ```
 
+```{r}
+# D. Transform land owned from a time variant to a time invariant variable
+# i. Summary of land owned by year
+remit_l |>
+  group_by(year) |>
+  summarise(
+    Min = min(land_owned, na.rm = TRUE),
+    Q1 = quantile(land_owned, 0.25, na.rm = TRUE),
+    Median = median(land_owned, na.rm = TRUE),
+    Mean = mean(land_owned, na.rm = TRUE),
+    Q3 = quantile(land_owned, 0.75, na.rm = TRUE),
+    Max = max(land_owned, na.rm = TRUE)
+  ) |>
+  mutate(across(where(is.numeric), \(x) round(x, 2))) |>
+  kable(caption = "Summary of land owned by year (Katha)")
 
-## 3. Descriptive statistics
+## ii. View who has changed in land ownership over the years
+remit_l |>
+  group_by(hhid) |>
+  summarize(distinct_values = n_distinct(land_owned, na.rm = TRUE)) |>
+  count(distinct_values)
+
+tv_land <- remit_l |>
+  group_by(hhid) |>
+  filter(n_distinct(land_owned, na.rm = TRUE) > 1) |>
+  ungroup(); tv_land
+
+land_variance <- remit_l |>
+  group_by(hhid) |>
+  filter(n_distinct(land_owned, na.rm = TRUE) > 1) |> # Optional: keep to only look at varying households
+  summarize(
+    land_var = var(land_owned, na.rm = TRUE),
+    .groups = "drop"
+  ); land_variance
+
+## iii. Create an average
+remit_l <- remit_l |>
+    group_by(hhid) |>
+  mutate(
+    land_avg = mean(land_owned, na.rm = TRUE)
+  ) |>
+  ungroup()
+```
+We have 571 (25%) of households whose landownership changes across the 9 years. Does it change drastically? Do we take the starting value, end value, or average?
+
+
+## 5. Descriptive statistics
 Descriptive statistics of the key variables modeling for each household:
 $$
 gross\ farm\ productivity\ \sim remittances\ + farm\ tech\ +\ \#\ of\ hired\ laborers\ +\ land
@@ -186,9 +246,9 @@ rem_plot_log
 ```
 
 
-### C. Farm technology --> NOTE: I couldn't find a good indicator of farm technology yet
-
+### C. Farm technology 
 ```{r}
+# i. Summary of farm tech indicator by year (1:3)
 remit_l |>
   group_by(year) |>
   summarise(
@@ -203,9 +263,8 @@ remit_l |>
     ) |>
   mutate(across(where(is.numeric), \(x) round(x, 2))) |>
   kable(caption = "Summary of farm technology indiactor (0-3) by year")
-```
 
-```{r}
+# ii. Distribution of farm tech indicator across years
 farm_tech_all_years_plot <- remit_l |>
   filter(!is.na(farm_tech)) |>
   ggplot(aes(x = factor(farm_tech))) +
@@ -222,7 +281,7 @@ farm_tech_all_years_plot
 Note: This plot excludes missing values.
 
 ```{r}
-#This plot excludes missing values and year 63 (only one valid observation).
+# iii. Distribution of farm tech indicator by year 
 farm_tech_by_year_plot <- remit_l |>
   filter(!is.na(farm_tech), year != 63) |>
   ggplot(aes(x = factor(farm_tech, levels = 0:3))) +
@@ -272,36 +331,37 @@ labor_plot <- remit_l |>
 labor_plot
 ```
 
-
-### E. Land
+### E. Land owned
 ```{r}
-remit_l |>
-  group_by(year) |>
-  summarise(
-    Min = min(land_owned, na.rm = TRUE),
-    Q1 = quantile(land_owned, 0.25, na.rm = TRUE),
-    Median = median(land_owned, na.rm = TRUE),
-    Mean = mean(land_owned, na.rm = TRUE),
-    Q3 = quantile(land_owned, 0.75, na.rm = TRUE),
-    Max = max(land_owned, na.rm = TRUE)
-  ) |>
-  mutate(across(where(is.numeric), \(x) round(x, 2))) |>
-  kable(caption = "Summary of land owned by year (Katha)")
-```
-
-```{r}
-land_plot <- remit_l |>
-  filter(!is.na(land_owned)) |>
-  ggplot(aes(x = land_owned)) +
+# ii. Distribution of average land owned over combined 9 years
+land_avg <- remit_l |>
+  group_by(hhid) |>
+  filter(!is.na(land_avg)) |>
+  ggplot(aes(x = land_avg)) +
   geom_histogram(
     bins = 30, fill = "skyblue", color = "white"
     ) +
-  labs(title = "Distribution of land owned (years 63-72 combined)",
+  labs(title = "Distribution of averge land owned (Years 64-72 combined)",
        x = "Land owned (Katha)",
-       y = "Number of observations") +
-  theme_classic()
+       y = "Frequency") +
+  theme_classic(); land_avg
 
-land_plot
+### iii. Distribution of land owned by year
+# land_plot_by_year <- remit_l |>
+#   filter(!is.na(land_owned), year != 63) |>
+#   ggplot(aes(x = land_owned)) +
+#   geom_bar(fill = "skyblue") +
+#   facet_wrap(~ year, ncol = 3) +
+#   scale_x_continuous(
+#     limits = c(0,100)
+#   ) +
+#   labs(
+#     title = "Distribution of land owned by year",
+#     x = "Land owned (Katha)",
+#     y = "Number of household observations") +
+#   theme_classic()
+# 
+# land_plot_by_year
 ```
 
 ### F. Demographics
@@ -360,7 +420,16 @@ kable(
   caption = "Missingness in the original GFP components"
 )
 ```
-```
+## 6. Running Models
+### A. Plots
+#### i. GFP by HH
+#### ii. GFP by year
+#### iii. GFP by HH and year
+#### iv. Plot subgroup proportions
+
+### B. Run model
+#### i. Mutli-level for continuous outcome
+#### ii. Marginal for continuous outcome
 
 
 
