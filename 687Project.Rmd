@@ -420,16 +420,402 @@ kable(
   caption = "Missingness in the original GFP components"
 )
 ```
+
 ## 6. Running Models
 ### A. Plots
+These models are preliminary. The current GFP composite mixes kilograms
+and rupees.
+```{r}
+library(nlme)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+# Retrieve original data without modifying remit_l
+model_raw <- temp_env[[loaded_names[1]]]
+
+component_names <- c(
+  "B11C_", "B12C_", "B13C_", "B14C_", "B15C_",
+  "B16B_",
+  "B17_1B_", "B17_2B_", "B17_3B_", "B17_4B_",
+  "B17_5B_", "B17_6B_", "B17_7B_",
+  "D30B_", "D31B_"
+)
+
+# Count available components in each household-year
+component_counts <- bind_rows(
+  lapply(64:72, function(y) {
+
+    components <- model_raw[
+      , paste0(component_names, y),
+      drop = FALSE
+    ]
+
+    tibble(
+      hhid = model_raw$HHID,
+      year = y,
+      n_components = rowSums(!is.na(components))
+    )
+  })
+)
+
+stopifnot(
+  !anyDuplicated(component_counts[c("hhid", "year")]),
+  !anyDuplicated(remit_l[c("hhid", "year")])
+)
+
+# Create a separate dataset for Section 6
+analysis_data <- remit_l |>
+  left_join(
+    component_counts,
+    by = c("hhid", "year")
+  ) |>
+  mutate(
+    # Prevent all-missing components from becoming a measured zero
+    gfp_preview = if_else(
+      n_components > 0,
+      gfp,
+      NA_real_
+    ),
+    year_bs = 2000L + year,
+    time = as.integer(year - 64),
+    wave = as.integer(year - 63),
+    year_f = factor(year_bs),
+    hhid = factor(hhid),
+    ethnic = factor(ethnic),
+
+    log_gfp = log1p(gfp_preview),
+    log_rem = log1p(rem),
+    log_labor = log1p(hired_lab),
+    log_land = log1p(land_avg)
+  ) |>
+  arrange(hhid, wave)
+
+stopifnot(!anyNA(analysis_data$n_components))
+
+analysis_data |>
+  group_by(year_bs) |>
+  summarise(
+    total = n(),
+    all_components_missing = sum(n_components == 0),
+    partially_observed = sum(
+      n_components > 0 & n_components < 15
+    ),
+    .groups = "drop"
+  ) |>
+  kable(
+    caption = "Availability of original GFP components"
+  )
+```
+```{r}
+gfp_rebuilt <- bind_rows(
+  lapply(64:72, function(y) {
+
+    components <- model_raw[
+      , paste0(component_names, y),
+      drop = FALSE
+    ]
+
+    stopifnot(
+      ncol(components) == 15,
+      all(vapply(components, is.numeric, logical(1)))
+    )
+
+    n_available <- rowSums(!is.na(components))
+    total <- rowSums(components, na.rm = TRUE)
+
+    # Complete absence cannot be regarded as zero
+    total[n_available == 0] <- NA_real_
+
+    tibble(
+      hhid = as.character(model_raw$HHID),
+      year = y,
+      gfp_rebuilt = total
+    )
+  })
+)
+
+analysis_data <- analysis_data |>
+  mutate(hhid = as.character(hhid)) |>
+  select(-any_of("gfp_rebuilt")) |>
+  left_join(
+    gfp_rebuilt,
+    by = c("hhid", "year")
+  ) |>
+  mutate(
+    gfp_preview = gfp_rebuilt,
+    log_gfp = log1p(gfp_preview),
+    hhid = factor(hhid)
+  )
+
+summary(analysis_data$gfp_preview)
+summary(analysis_data$log_gfp)
+
+stopifnot(
+  any(analysis_data$gfp_preview > 0, na.rm = TRUE)
+)
+```
+
 #### i. GFP by HH
+Each household contributes one mean across its available years.
+```{r}
+hh_summary <- analysis_data |>
+  group_by(hhid) |>
+  summarise(
+    mean_log_gfp = if (all(is.na(log_gfp))) {
+      NA_real_
+    } else {
+      mean(log_gfp, na.rm = TRUE)
+    },
+    .groups = "drop"
+  )
+
+hh_summary |>
+  filter(is.finite(mean_log_gfp)) |>
+  ggplot(aes(x = mean_log_gfp)) +
+  geom_histogram(
+    bins = 35,
+    fill = "steelblue",
+    color = "white"
+  ) +
+  labs(
+    title = "Provisional GFP differences between households",
+    subtitle = "One mean per household; mixed units remain unresolved",
+    x = "Household mean of log(1 + provisional GFP)",
+    y = "Number of households"
+  ) +
+  theme_bw()
+```
+
 #### ii. GFP by year
+```{r}
+year_summary <- analysis_data |>
+  filter(is.finite(log_gfp)) |>
+  group_by(year_bs) |>
+  summarise(
+    n_households = n(),
+    mean_log_gfp = mean(log_gfp),
+    sd_log_gfp = sd(log_gfp),
+    .groups = "drop"
+  )
+
+kable(
+  year_summary,
+  digits = 3,
+  caption = "Provisional GFP by year"
+)
+
+ggplot(
+  year_summary,
+  aes(x = year_bs, y = mean_log_gfp)
+) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "steelblue", size = 2) +
+  scale_x_continuous(breaks = 2064:2072) +
+  labs(
+    title = "Annual mean of the provisional GFP composite",
+    subtitle = "The households contributing to each mean may differ",
+    x = "Nepali year (BS)",
+    y = "Mean log(1 + provisional GFP)"
+  ) +
+  theme_bw()
+```
+```{r}
+analysis_data |>
+  group_by(year_bs) |>
+  summarise(
+    n_observed = sum(!is.na(gfp_preview)),
+
+    n_zero = sum(gfp_preview == 0, na.rm = TRUE),
+
+    percent_zero = 100 * n_zero / n_observed,
+
+    mean_components = mean(
+      n_components[n_components > 0]
+    ),
+
+    .groups = "drop"
+  ) |>
+  kable(
+    digits = 2,
+    caption = "Zero values and component availability by year"
+  )
+```
+```{r}
+bind_rows(
+  lapply(2071:2072, function(y) {
+
+    x <- model_raw[
+      , paste0(component_names, y - 2000),
+      drop = FALSE
+    ]
+
+    tibble(
+      year = y,
+      component = component_names,
+      n_observed = colSums(!is.na(x)),
+      n_zero = colSums(x == 0, na.rm = TRUE),
+      n_positive = colSums(x > 0, na.rm = TRUE)
+    )
+  })
+) |>
+  arrange(component, year) |>
+  kable(
+    caption = "Component availability: 2071 versus 2072"
+  )
+```
+
+
 #### iii. GFP by HH and year
+```{r}
+set.seed(687)
+
+eligible_households <- analysis_data |>
+  group_by(hhid) |>
+  summarise(
+    n_available = sum(is.finite(log_gfp)),
+    .groups = "drop"
+  ) |>
+  filter(n_available >= 2) |>
+  pull(hhid) |>
+  as.character()
+
+selected_households <- sample(
+  eligible_households,
+  size = min(20, length(eligible_households))
+)
+
+trajectory_data <- analysis_data |>
+  filter(as.character(hhid) %in% selected_households)
+
+trajectory_mean <- trajectory_data |>
+  filter(is.finite(log_gfp)) |>
+  group_by(year_bs) |>
+  summarise(
+    mean_log_gfp = mean(log_gfp),
+    .groups = "drop"
+  )
+
+ggplot(
+  trajectory_data,
+  aes(
+    x = year_bs,
+    y = log_gfp,
+    group = hhid
+  )
+) +
+  geom_line(
+    color = "grey65",
+    alpha = 0.7,
+    na.rm = TRUE
+  ) +
+  geom_point(
+    color = "grey65",
+    alpha = 0.7,
+    na.rm = TRUE
+  ) +
+  geom_line(
+    data = trajectory_mean,
+    aes(
+      x = year_bs,
+      y = mean_log_gfp,
+      group = 1
+    ),
+    inherit.aes = FALSE,
+    color = "black",
+    linewidth = 1.2
+  ) +
+  geom_point(
+    data = trajectory_mean,
+    aes(x = year_bs, y = mean_log_gfp),
+    inherit.aes = FALSE,
+    color = "black",
+    size = 2
+  ) +
+  scale_x_continuous(breaks = 2064:2072) +
+  labs(
+    title = "Provisional GFP trajectories for selected households",
+    subtitle = "Grey: households; black: selected-household annual mean",
+    x = "Nepali year (BS)",
+    y = "log(1 + provisional GFP)"
+  ) +
+  theme_bw()
+```
+
 #### iv. Plot subgroup proportions
+```{r}
+# One pooled threshold, held fixed across all years
+gfp_threshold <- quantile(
+  analysis_data$gfp_preview[
+    is.finite(analysis_data$gfp_preview)
+  ],
+  probs = 0.75,
+  names = FALSE
+)
+
+subgroup_data <- analysis_data |>
+  mutate(
+    above_threshold = case_when(
+      !is.finite(gfp_preview) ~ NA_real_,
+      gfp_preview > gfp_threshold ~ 1,
+      TRUE ~ 0
+    )
+  ) |>
+  filter(
+    !is.na(ethnic),
+    !is.na(above_threshold)
+  ) |>
+  group_by(ethnic, year_bs) |>
+  summarise(
+    n_observed = n(),
+    proportion = mean(above_threshold),
+    .groups = "drop"
+  )
+
+ggplot(
+  subgroup_data,
+  aes(
+    x = year_bs,
+    y = proportion,
+    color = ethnic,
+    group = ethnic
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 2064:2072) +
+  scale_y_continuous(
+    labels = scales::percent,
+    limits = c(0, 1)
+  ) +
+  labs(
+    title = "Proportion above a fixed provisional GFP threshold",
+    subtitle = paste(
+      "Threshold: pooled 75th percentile =",
+      round(gfp_threshold, 2),
+      "(mixed units)"
+    ),
+    x = "Nepali year (BS)",
+    y = "Proportion among observed households in each group",
+    color = "Ethnicity"
+  ) +
+  theme_bw()
+
+```
+
 
 ### B. Run model
 #### i. Mutli-level for continuous outcome
+```{r}
+
+```
+
+
+
 #### ii. Marginal for continuous outcome
+```{r}
+
+```
+
 
 
 
