@@ -849,6 +849,47 @@ ggplot(
 ### B. Run model
 #### i. Mutli-level for continuous outcome
 ```{r}
+model_data <- analysis_data |>
+  filter(
+    !is.na(hhid),
+    is.finite(year_bs),
+    is.finite(log_gfp),
+    is.finite(log_rem),
+    is.finite(farm_tech),
+    is.finite(log_labor),
+    is.finite(log_land)
+  ) |>
+  mutate(
+    hhid = factor(hhid),
+    time = as.integer(year_bs - 2064),
+    wave = as.integer(year_bs - 2063),
+    year_f = factor(year_bs)
+  ) |>
+  arrange(hhid, time) |>
+  droplevels()
+
+stopifnot(
+  nrow(model_data) > 0,
+  !anyDuplicated(model_data[c("hhid", "time")])
+)
+
+# 3. Center log land ownership using one value per household
+land_center <- model_data |>
+  distinct(hhid, log_land) |>
+  summarise(value = mean(log_land)) |>
+  pull(value)
+
+model_data <- model_data |>
+  mutate(log_land_c = log_land - land_center)
+
+# 4. Check the sample size and included years
+model_data |>
+  summarise(
+    observations = n(),
+    households = n_distinct(hhid),
+    first_year = min(year_bs),
+    last_year = max(year_bs)
+  )
 # Basic time model
 ml_full <- lme(
   fixed = log_gfp ~ time,
