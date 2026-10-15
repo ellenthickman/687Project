@@ -21,7 +21,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-## 2. Import CVFS data: Labour Outmigration, Agricultural Productivity and Food Security, Nepal, 2015-2017 
+## 2. Import CVFS data: Labour Outmigration, Agricultural Productivity and Food Security, Nepal, 2064-2072
 ```{r}
 # A. Load data
 github_remittance_url <- paste0(
@@ -44,7 +44,12 @@ tv_prefixes <- c(
 )
 
 remit_w <- remit_w |>
-  select(HHID, ETHNICITY,  starts_with(tv_prefixes) & !ends_with("63")) # Excluding year 2063 due to missing data in gfp indicator
+  select(
+    HHID,
+    ETHNICITY,
+    starts_with(tv_prefixes),
+    -ends_with(c("63", "72")) # Excluding year 2063 due to missing data in gfp indicator and 2072 due to missing variables and missing conversion data
+  ) 
 
 # C. Transform from wide to long
 remit_l <- remit_w |>
@@ -53,23 +58,61 @@ remit_l <- remit_w |>
       paste0(
         "^(",
         paste(tv_prefixes, collapse = "|"),
-        ")(64|65|66|67|68|69|70|71|72)$" 
+        ")(64|65|66|67|68|69|70|71)$" 
       )
     ),
     names_to = c(".value", "year"),
-    names_pattern = "^(.*?)(64|65|66|67|68|69|70|71|72)$",
+    names_pattern = "^(.*?)(64|65|66|67|68|69|70|71)$",
     names_transform = list(year = as.integer)
   )
 ```
 ## 3. Clean Data
 ```{r}
 # A. Create a gross farm product
-## i. Set variable list
-gfp_vars <- c("B11C_", # Rice (KG)
-              "B12C_", # Maize (KG)
-              "B13C_", # Wheat (KG)
-              "B14C_", # Mustard (KG)
-              "B15C_", # Red Lentil (KG)
+## i. Convert KG amounts to rupees per kg using Ministry of Agriculture data: https://caidmp.gov.np/downloadsfiles/special-issue-book-2072_price-%281%29-1692180081.pdf 
+### Download data
+library(readxl)
+
+conversion_url <- "https://github.com/ellenthickman/687Project/raw/refs/heads/main/conversion.xlsx"
+
+tmp <- tempfile(fileext = ".xlsx")
+download.file(conversion_url, tmp, mode = "wb")
+
+conversion_data <- read_excel(tmp)
+
+unlink(tmp)
+
+### Lowercase all column names
+conversion_data <- conversion_data %>% rename_with(tolower)
+
+### Convert long data to wide format
+conversion_w <- conversion_data %>%
+  pivot_wider(
+    names_from = commodities,  # Column containing the future header names
+    values_from = rupees_per_kg,  # Column containing the actual data values
+    names_prefix = "price_"      # This creates columns like price_B11C_ so names don't clash
+  )
+
+### Join by year and multiply each crop column by its matching price column
+remit_l <- remit_l %>%
+  left_join(conversion_w, by = "year") %>%
+  mutate(
+    # Multiply the KG amounts by the matching rupee per kg prices
+    B11C_rupees = B11C_ * price_B11C_,
+    B12C_rupees = B12C_ * price_B12C_,
+    B13C_rupees = B13C_ * price_B13C_,
+    B14C_rupees = B14C_ * price_B14C_,
+    B15C_rupees = B15C_ * price_B15C_
+  ) %>%
+  # Optional: drop the temporary price columns to keep your dataset clean
+  select(-starts_with("price_"))
+
+## ii. Set variable list
+gfp_vars <- c("B11C_rupees", # Rice (KG originally)
+              "B12C_rupees", # Maize (KG originally)
+              "B13C_rupees", # Wheat (KG originally)
+              "B14C_rupees", # Mustard (KG originally)
+              "B15C_rupees", # Red Lentil (KG originally)
               "B16B_", # Vegetable
               "B17_1B_", # Buckwheat
               "B17_2B_", # Finger millet
@@ -81,7 +124,7 @@ gfp_vars <- c("B11C_", # Rice (KG)
               "D30B_", # Poultry production
               "D31B_") # Other farming production
 
-## ii. Mutate to generate gfp indicator
+## iii. Mutate to generate gfp indicator
 remit_l <- remit_l |>
   mutate(
     across(
@@ -91,7 +134,7 @@ remit_l <- remit_l |>
     gfp = rowSums(across(any_of(gfp_vars)), na.rm = TRUE)
   )
 
-## iii. Drop extraneous variables 
+## iv. Drop extraneous variables 
 remit_l <- remit_l |>
   select(-any_of(gfp_vars))
 ```
