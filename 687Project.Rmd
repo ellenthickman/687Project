@@ -806,9 +806,271 @@ ggplot(
 ### B. Run model
 #### i. Mutli-level for continuous outcome
 ```{r}
+# Basic time model
+ml_full <- lme(
+  fixed = log_gfp ~ time,
+  random = ~ 1 + time | hhid,
+  # The residuals of the same family are calculated using AR(1), retaining the real year intervals
+  correlation = corAR1(
+    value = 0.2,
+    form = ~ time | hhid,
+    fixed = FALSE
+  ),
 
+  data = model_data,
+  method = "REML",
+  na.action = na.fail,
+
+  control = lmeControl(
+    opt = "nlminb",
+    maxIter = 100,
+    msMaxIter = 300,
+    msMaxEval = 1000
+  )
+)
+
+summary(ml_full)
+VarCorr(ml_full)
+coef(
+  ml_full$modelStruct$corStruct,
+  unconstrained = FALSE
+)
 ```
 
+
+```{r}
+# remove the random time slope and retain AR(1)
+ml_reduced <- NULL
+
+ml_reduced <- lme(
+  fixed = log_gfp ~ time,
+
+  random = ~ 1 | hhid,
+
+  correlation = corAR1(
+    value = 0.2,
+    form = ~ time | hhid,
+    fixed = FALSE
+  ),
+
+  data = model_data,
+  method = "REML",
+  na.action = na.fail,
+
+  control = lmeControl(
+    opt = "nlminb",
+    maxIter = 100,
+    msMaxIter = 300,
+    msMaxEval = 1000
+  )
+)
+
+summary(ml_reduced)
+
+# Compare model fitting
+# The two models use the same samples, fixed effects and AR(1) structure
+stopifnot(nobs(ml_full) == nobs(ml_reduced))
+
+kable(
+  AIC(ml_reduced, ml_full),
+  digits = 2,
+  caption = "Random intercept versus random intercept and slope"
+)
+
+# Calculate the likelihood ratio test statistic
+lrt_stat <- 2 * (
+  as.numeric(logLik(ml_full)) -
+    as.numeric(logLik(ml_reduced))
+)
+
+if (lrt_stat < -0.001) {
+  stop("Full model has lower likelihood. Check optimization.")
+}
+
+lrt_stat <- max(0, lrt_stat)
+
+# Calculate the P-value using an approximate mixed distribution
+mixture_p <- 0.5 * pchisq(
+  lrt_stat, df = 1, lower.tail = FALSE
+) +
+  0.5 * pchisq(
+    lrt_stat, df = 2, lower.tail = FALSE
+  )
+
+# Use formatted text to avoid very small P-values being displayed as 0
+kable(
+  data.frame(
+    LRT = round(lrt_stat, 3),
+    p_value = format.pval(
+      mixture_p,
+      digits = 3,
+      eps = 0.0001
+    )
+  ),
+  caption = "Approximate test of random time-slope variance"
+)
+```
+We compared a random-intercept model with a random-intercept and random-slope model, retaining an AR(1) residual correlation structure in both. Adding a random time slope improved model fit (AIC: 62036.34 versus 61993.68; approximate likelihood ratio test: 46.657, p < 0.0001). This supports allowing the linear time trend to vary across households. We therefore retain the random-intercept and random-slope structure with AR(1) residuals for the next modeling step. These findings remain preliminary because the GFP composite combines different units and component availability differs across years.
+
+```{r}
+ml_main <- update(
+  ml_full,
+  fixed = log_gfp ~ time +
+    log_rem +
+    farm_tech +
+    log_labor +
+    log_land_c,
+  data = model_data,
+  method = "REML"
+)
+
+summary(ml_main)
+VarCorr(ml_main)
+coef(
+  ml_main$modelStruct$corStruct,
+  unconstrained = FALSE
+)
+```
+The adjusted multilevel model included remittances, farm technology, hired labor, and average land ownership, together with time. Random household intercepts, random time slopes, and AR(1) residual correlation were retained. Remittances showed a small positive association with the log-transformed provisional GFP composite (β = 0.0093, p = 0.0292). Farm technology, hired labor, and average land ownership were also positively associated with the outcome (all p < 0.0001), while the time coefficient was negative (β = −0.1580, p < 0.0001). The estimated AR(1) parameter was 0.575. These associations remain preliminary because the outcome combines different units and the availability of its components varies across years.
+
+```{r}
+ml_time_ML <- update(
+  ml_full,
+  method = "ML"
+)
+
+ml_main_ML <- update(
+  ml_main,
+  method = "ML"
+)
+
+stopifnot(
+  nobs(ml_time_ML) == nobs(ml_main_ML)
+)
+
+anova(ml_time_ML, ml_main_ML)
+```
+Using maximum likelihood estimation, we compared the time-only model with a model additionally including remittances, farm technology, hired labor, and average land ownership. Both models retained random household intercepts, random time slopes, and AR(1) residual correlation. Adding the four predictors significantly improved model fit (likelihood ratio test: χ²(4) = 1238.68, p < 0.0001). AIC decreased from 61983.50 to 60752.82, and BIC decreased from 62036.15 to 60835.56. We retain the adjusted model for further diagnostics, with substantive interpretation remaining provisional because of unresolved outcome measurement issues.
+
+```{r}
+# Extract the standardized residuals after considering the relevant structures, as well as the fitted values at the household level
+res_main <- residuals(ml_main, type = "normalized")
+fit_main <- fitted(ml_main, level = 1)
+
+old_par <- par(mfrow = c(1, 2))
+
+# Check whether the residuals take on a curve or funnel shape with the fitted values
+plot(
+  fit_main, res_main,
+  xlab = "Fitted values",
+  ylab = "Normalized residuals",
+  main = "Residuals vs fitted",
+  pch = 16,
+  cex = 0.4,
+  col = adjustcolor("steelblue", alpha.f = 0.25)
+)
+abline(h = 0, col = "red", lty = 2)
+
+# Check whether the residual distribution is close to normal
+qqnorm(
+  res_main,
+  main = "Normal Q-Q plot",
+  pch = 16,
+  cex = 0.4
+)
+qqline(res_main, col = "red")
+
+par(old_par)
+```
+
+```{r}
+diag_data <- nlme::getData(ml_main)
+stopifnot(nrow(diag_data) == length(res_main))
+diag_data$normalized_residual <- as.numeric(res_main)
+
+# Residual distribution in each year
+boxplot(
+  normalized_residual ~ year_bs,
+  data = diag_data,
+  xlab = "Nepali year (BS)",
+  ylab = "Normalized residuals",
+  main = "Residuals by year",
+  col = "lightblue",
+  outline = FALSE
+)
+
+abline(h = 0, col = "red", lty = 2)
+```
+
+Keep the original model and fit another one that does not include the year 2072:
+```{r}
+# Sensitivity analysis data
+model_data_pre72 <- model_data |>
+  filter(year_bs < 2072) |>
+  droplevels()
+
+ml_main_pre72 <- update(
+  ml_main,
+  data = model_data_pre72,
+  method = "REML"
+)
+
+# Compare the coefficient and standard error
+full_results <- summary(ml_main)$tTable
+pre72_results <- summary(ml_main_pre72)$tTable
+
+comparison <- data.frame(
+  term = rownames(full_results),
+  estimate_all_years = full_results[, "Value"],
+  SE_all_years = full_results[, "Std.Error"],
+  estimate_without_2072 =
+    pre72_results[rownames(full_results), "Value"],
+  SE_without_2072 =
+    pre72_results[rownames(full_results), "Std.Error"],
+  row.names = NULL
+)
+
+kable(
+  comparison,
+  digits = 4,
+  caption = "Sensitivity analysis: including versus excluding 2072"
+)
+```
+The sensitivity analysis showed that the estimates were sensitive to the inclusion of 2072. Excluding this year reversed the signs of both the time coefficient (−0.1580 to 0.0462) and the remittance coefficient (0.0093 to −0.0081). Farm technology, hired labor, and average land ownership remained positively associated with the outcome, although their estimated coefficients changed. Thus, the direction of the remittance association was not robust to the analysis period. Given the reduced availability of GFP components in 2072, both specifications are retained as preliminary analyses pending further assessment of measurement comparability.
+
+```{r}
+# Residual diagnosis excluding the 2072 model
+res_pre72 <- residuals(
+  ml_main_pre72,
+  type = "normalized"
+)
+
+fit_pre72 <- fitted(ml_main_pre72, level = 1)
+
+old_par <- par(mfrow = c(1, 2))
+
+plot(
+  fit_pre72, res_pre72,
+  xlab = "Fitted values",
+  ylab = "Normalized residuals",
+  main = "Residuals: 2064–2071",
+  pch = 16,
+  cex = 0.4,
+  col = adjustcolor("steelblue", alpha.f = 0.25)
+)
+abline(h = 0, col = "red", lty = 2)
+
+qqnorm(
+  res_pre72,
+  main = "Normal Q-Q: 2064–2071",
+  pch = 16,
+  cex = 0.4
+)
+qqline(res_pre72, col = "red")
+
+par(old_par)
+```
+Excluding 2072 did not resolve the residual diagnostic concerns. The residual-versus-fitted plot continued to show structured patterns and uneven dispersion, while the normal Q-Q plot showed substantial departures from normality in both tails. Thus, the model adequacy concerns are not confined to 2072. Together with the reversal of the time and remittance coefficients in the sensitivity analysis, these findings indicate that substantive conclusions remain tentative. Further assessment of outcome construction, missing-data handling, and model specification is needed.
 
 
 #### ii. Marginal for continuous outcome
