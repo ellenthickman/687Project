@@ -849,192 +849,146 @@ ggplot(
 ### B. Run model
 #### i. Mutli-level for continuous outcome
 ```{r}
+library(lme4)
+library(lmerTest)
+library(dplyr)
+library(knitr)
+
+# Prepare a common analysis sample
+# Keep the same households and observations
+# for all model comparisons
+
 model_data <- analysis_data |>
   filter(
-    !is.na(hhid),
-    !is.na(ethnic),
-    is.finite(year_bs),
     is.finite(log_gfp),
     is.finite(log_rem),
-    is.finite(farm_tech),
     is.finite(log_labor),
-    is.finite(log_land)
+    is.finite(farm_tech),
+    is.finite(log_land),
+    !is.na(time),
+    !is.na(ethnic),
+    !is.na(hhid)
   ) |>
   mutate(
     hhid = factor(hhid),
     ethnic = factor(ethnic),
-    time = as.integer(year_bs - 2064),
-    wave = as.integer(year_bs - 2063),
-    year_f = factor(year_bs)
+    time_f = factor(time)
   ) |>
-  arrange(hhid, time) |>
   droplevels()
 
-stopifnot(
-  nrow(model_data) > 0,
-  !anyDuplicated(model_data[c("hhid", "time")])
-)
+# Check sample size
+cat("Observations:", nrow(model_data), "\n")
+cat("Households:", n_distinct(model_data$hhid), "\n")
+table(model_data$time_f)
+```
 
-# 2. Center log land ownership using one value per household
-land_center <- model_data |>
-  distinct(hhid, log_land) |>
-  summarise(value = mean(log_land)) |>
-  pull(value)
+####Empty Model (Unconditional Model)
 
-model_data <- model_data |>
-  mutate(log_land_c = log_land - land_center)
-
-# 3. Check the sample size and included years
-model_data |>
-  summarise(
-    observations = n(),
-    households = n_distinct(hhid),
-    first_year = min(year_bs),
-    last_year = max(year_bs)
-  )
-
-# 4. Fit the multilevel model
-ml_random_inputs <- lme(
-  fixed = log_gfp ~ year_f + ethnic + log_land_c +
-    log_rem + log_labor + farm_tech,
-
-  random = ~ 1 + log_rem + log_labor + farm_tech | hhid,
-
-  # AR(1) residual correlation using actual year gaps
-  correlation = corAR1(
-    value = 0.2,
-    form = ~ time | hhid,
-    fixed = FALSE
-  ),
-
+```{r}
+# Random intercept only
+m0 <- lmer(
+  log_gfp ~ 1 + (1 | hhid),
   data = model_data,
-  method = "REML",
-  na.action = na.fail,
-
-  control = lmeControl(
-    opt = "nlminb",
-    maxIter = 100,
-    msMaxIter = 300,
-    msMaxEval = 1000
-  )
+  REML = TRUE
 )
 
-# 5. Inspect model results
-summary(ml_random_inputs)
-VarCorr(ml_random_inputs)
+summary(m0)
 
-coef(
-  ml_random_inputs$modelStruct$corStruct,
-  unconstrained = FALSE
-)
+# Calculate ICC
+vc <- as.data.frame(VarCorr(m0))
+
+var_hh <- vc$vcov[vc$grp == "hhid"]
+var_resid <- sigma(m0)^2
+
+ICC <- var_hh / (var_hh + var_resid)
+
+cat("Household variance:", var_hh, "\n")
+cat("Residual variance:", var_resid, "\n")
+cat("ICC:", ICC, "\n")
 ```
 
+####Add Level-1 Fixed Effects
 
 ```{r}
-ml_intercept_only <- update(
-  ml_random_inputs,
-  random = ~ 1 | hhid,
-  method = "REML"
-)
-
-stopifnot(
-  identical(
-    rownames(nlme::getData(ml_intercept_only)),
-    rownames(nlme::getData(ml_random_inputs))
-  ),
-  nobs(ml_intercept_only) == nobs(ml_random_inputs)
-)
-
-# Compare the structures of random effects
-model_comparison <- data.frame(
-  model = c(
-    "Random intercept only",
-    "Random intercept + three random slopes"
-  ),
-  AIC = c(
-    AIC(ml_intercept_only),
-    AIC(ml_random_inputs)
-  ),
-  BIC = c(
-    BIC(ml_intercept_only),
-    BIC(ml_random_inputs)
-  )
-)
-
-knitr::kable(
-  model_comparison,
-  digits = 2,
-  caption = "Comparison of random-effects structures"
-)
-```
-With the same fixed effects, analysis sample, and AR(1) residual structure, the model allowing household-specific slopes for remittances, hired labor, and farm technology had lower AIC and BIC than the random-intercept-only model. AIC decreased from 50150.95 to 49336.53, and BIC decreased from 50299.06 to 49551.28. We retain this random-slope specification provisionally for further diagnostics.
-
-
-```{r}
-ml_main <- update(
-  ml_full,
-  fixed = log_gfp ~ time +
-    log_rem +
-    farm_tech +
-    log_labor +
-    log_land_c,
+# Time, remittances, labor and farm technology
+m1 <- lmer(
+  log_gfp ~ time_f + log_rem +
+    log_labor + farm_tech +
+    (1 | hhid),
   data = model_data,
-  method = "REML"
+  REML = TRUE
 )
 
-summary(ml_main)
-VarCorr(ml_main)
-coef(
-  ml_main$modelStruct$corStruct,
-  unconstrained = FALSE
-)
+summary(m1)
 ```
-The adjusted multilevel model included remittances, farm technology, hired labor, and average land ownership, together with time. Random household intercepts, random time slopes, and AR(1) residual correlation were retained. Remittances showed a small positive association with the log-transformed provisional GFP composite (β = 0.0093, p = 0.0292). Farm technology, hired labor, and average land ownership were also positively associated with the outcome (all p < 0.0001), while the time coefficient was negative (β = −0.1580, p < 0.0001). The estimated AR(1) parameter was 0.575. These associations remain preliminary because the outcome combines different units and the availability of its components varies across years.
+
+####Compare M0 and M1
 
 ```{r}
-# Diagnostics for the revised model
-res_new <- residuals(
-  ml_random_inputs,
-  type = "normalized"
-)
+# Refit with ML because fixed effects differ
+m0_ml <- update(m0, REML = FALSE)
+m1_ml <- update(m1, REML = FALSE)
 
-fit_new <- fitted(ml_random_inputs, level = 1)
+anova(m0_ml, m1_ml)
 
-old_par <- par(mfrow = c(1, 2))
-
-plot(
-  fit_new, res_new,
-  xlab = "Fitted values",
-  ylab = "Normalized residuals",
-  main = "Residuals vs fitted",
-  pch = 16,
-  cex = 0.4,
-  col = adjustcolor("steelblue", alpha.f = 0.25)
-)
-abline(h = 0, col = "red", lty = 2)
-
-qqnorm(
-  res_new,
-  main = "Normal Q-Q plot",
-  pch = 16,
-  cex = 0.4
-)
-qqline(res_new, col = "red")
-
-par(old_par)
+# Check AIC and BIC using ML fits
+AIC(m0_ml, m1_ml)
+BIC(m0_ml, m1_ml)
 ```
-Although the random-slope model had lower AIC and BIC than the random-intercept-only model, residual diagnostics continued to indicate model inadequacy. The residual-versus-fitted plot showed structured patterns and uneven dispersion, and the Q-Q plot showed substantial departures from normality in both tails. These concerns persisted with categorical year effects and an analysis period restricted to 2064–2071. The model therefore remains preliminary.
 
-
-
-
-#### ii. Marginal for continuous outcome
 ```{r}
+# Step 2: Random intercept + random slope for remittances
 
+m2 <- lmer(
+  log_gfp ~ time_f + log_rem +
+    log_labor + farm_tech +
+    (1 + log_rem | hhid),
+  data = model_data,
+  REML = TRUE,
+  control = lmerControl(optimizer = "bobyqa")
+)
+
+summary(m2)
 ```
 
+```{r}
+anova(m1, m2, refit = FALSE)
+```
 
+```{r}
+# M3: Random Intercept + Remittance and Labor Random Slopes
 
+m3 <- lmer(
+  log_gfp ~ time_f + log_rem + log_labor + farm_tech +
+    (1 + log_rem + log_labor | hhid),
+  data = model_data,
+  REML = TRUE,
+  control = lmerControl(optimizer = "bobyqa")
+)
 
+summary(m3)
+```
+
+```{r}
+anova(m2, m3, refit = FALSE)
+```
+```{r}
+# M4: Random Intercept + Three Random Slopes
+
+m4 <- lmer(
+  log_gfp ~ time_f + log_rem + log_labor + farm_tech +
+    (1 + log_rem + log_labor + farm_tech | hhid),
+  data = model_data,
+  REML = TRUE,
+  control = lmerControl(optimizer = "bobyqa")
+)
+
+summary(m4)
+```
+
+```{r}
+# Compare M3 and M4
+anova(m3, m4, refit = FALSE)
+```
 
 
