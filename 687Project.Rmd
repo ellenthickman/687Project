@@ -819,7 +819,19 @@ anova(m3, m4, refit = FALSE)
 ```
 
 ```{r}
+# M5: Only keep the random slopes of labor and farm_tech
+m5 <- lmer(
+  log_gfp ~ time_f + log_rem + log_labor + farm_tech + log_land +
+    (1 + log_labor + farm_tech | hhid),
+  data = model_data,
+  REML = TRUE,
+  control = lmerControl(optimizer = "bobyqa")
+)
 
+summary(m5)
+isSingular(m5)
+
+anova(m4, m5, refit = FALSE)
 ```
 
 
