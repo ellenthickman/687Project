@@ -464,6 +464,51 @@ kable(
 )
 ```
 
+```{r}
+#Questions corresponding to the sales variables in check_vars
+question_vars <- c(
+  "B11_", "B12_", "B13_", "B14_", "B15_", "B16_", paste0("B17_", 1:7, "_"),
+  "D30_", "D31_"
+)
+
+eligibility_check <- data.frame()
+
+for(y in 64:71) {
+  for(i in seq_along(check_vars)) {
+    sales_name <- paste0(check_vars[i], y)
+    question_name <- paste0(question_vars[i],y)
+    
+    stopifnot(
+      sales_name %in% names(raw_data),
+      question_name %in% names(raw_data)
+    )
+    
+    sales <- raw_data[[sales_name]]
+    response <- as.character(raw_data[[question_name]])
+    
+    counts <- as.data.frame(
+      table(response[is.na(sales)], useNA = "ifany"),
+      stringsAsFactors = FALSE
+    )
+    names(counts) <- c("response", "n")
+    
+    if(nrow(counts) > 0) {
+      counts$year <- 2000 + y
+      counts$variable <- sales_name
+      eligibility_check <- rbind(eligibility_check, counts)
+    }
+  }
+}
+
+view(eligibility_check)
+```
+
+```{r}
+eligibility_check %>%
+  group_by(response) %>%
+  summarise(n = sum(n), .groups = "drop")
+```
+
 ## 6. Running Models
 ### A. Plots
 GFP is measured in rupees, using the crop-price conversions in Section 3.
