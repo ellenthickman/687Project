@@ -573,6 +573,29 @@ analysis_data <- analysis_data |>
 
 ```
 
+```{r}
+rem_lag_data <- raw_data %>%
+  select (HHID, all_of(paste0("REM", 63:70))) %>%
+  pivot_longer(
+    cols = -HHID,
+    names_to = "year",
+    names_prefix = "REM",
+    values_to = "rem_lag"
+  ) %>%
+  mutate(year = as.integer(year) + 1) %>%
+  rename(hhid = HHID)
+
+analysis_data <- analysis_data %>%
+  left_join(rem_lag_data, by = c("hhid", "year")) %>%
+  mutate(log_rem_lag = log1p(rem_lag))
+
+#check curren and previous-year remittances
+analysis_data %>%
+  select(hhid, year, rem, rem_lag) %>%
+  head(10)
+  
+```
+
 #### i. GFP by HH
 Each household contributes one mean across its available years.
 ```{r}
